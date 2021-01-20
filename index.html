@@ -1,51 +1,92 @@
 <!DOCTYPE html>
 <meta charset="utf-8">
+<style>
+
+path {
+  fill: #ddd;
+  fill-opacity: .8;
+  stroke: #fff;
+  stroke-width: 1.5px;
+}
+
+line {
+  stroke: #999;
+}
+
+</style>
 <body>
 <script src="//d3js.org/d3.v3.min.js"></script>
+<script src="//d3js.org/topojson.v1.min.js"></script>
 <script>
 
-var w = 960,
-    h = 500,
-    nodes = [],
-    node;
+var width = 960,
+    height = 500;
 
-var vis = d3.select("body").append("svg")
-    .attr("width", w)
-    .attr("height", h);
+var path = d3.geo.path(),
+    force = d3.layout.force().size([width, height]);
 
-var force = d3.layout.force()
-    .nodes(nodes)
-    .links([])
-    .size([w, h]);
+var svg = d3.select("body").append("svg")
+    .attr("width", width)
+    .attr("height", height);
 
-force.on("tick", function(e) {
-  vis.selectAll("path")
-      .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; });
-});
+d3.json("/mbostock/raw/4090846/us.json", function(error, us) {
+  if (error) throw error;
 
-setInterval(function(){
+  var states = topojson.feature(us, us.objects.states),
+      nodes = [],
+      links = [];
 
-  // Add a new random shape.
-  nodes.push({
-    type: d3.svg.symbolTypes[~~(Math.random() * d3.svg.symbolTypes.length)],
-    size: Math.random() * 300 + 100
+  states.features.forEach(function(d, i) {
+    if (d.id === 2 || d.id === 15 || d.id === 72) return; // lower 48
+    var centroid = path.centroid(d);
+    if (centroid.some(isNaN)) return;
+    centroid.x = centroid[0];
+    centroid.y = centroid[1];
+    centroid.feature = d;
+    nodes.push(centroid);
   });
 
-  // Restart the layout.
-  force.start();
+  d3.geom.voronoi().links(nodes).forEach(function(link) {
+    var dx = link.source.x - link.target.x,
+        dy = link.source.y - link.target.y;
+    link.distance = Math.sqrt(dx * dx + dy * dy);
+    links.push(link);
+  });
 
-  vis.selectAll("path")
+  force
+      .gravity(0)
+      .nodes(nodes)
+      .links(links)
+      .linkDistance(function(d) { return d.distance; })
+      .start();
+
+  var link = svg.selectAll("line")
+      .data(links)
+    .enter().append("line")
+      .attr("x1", function(d) { return d.source.x; })
+      .attr("y1", function(d) { return d.source.y; })
+      .attr("x2", function(d) { return d.target.x; })
+      .attr("y2", function(d) { return d.target.y; });
+
+  var node = svg.selectAll("g")
       .data(nodes)
-    .enter().append("path")
+    .enter().append("g")
+      .attr("transform", function(d) { return "translate(" + -d.x + "," + -d.y + ")"; })
+      .call(force.drag)
+    .append("path")
       .attr("transform", function(d) { return "translate(" + d.x + "," + d.y + ")"; })
-      .attr("d", d3.svg.symbol()
-        .size(function(d) { return d.size; })
-        .type(function(d) { return d.type; }))
-      .style("fill", "steelblue")
-      .style("stroke", "white")
-      .style("stroke-width", "1.5px")
-      .call(force.drag);
+      .attr("d", function(d) { return path(d.feature); });
 
-}, 1000);
+  force.on("tick", function(e) {
+    link.attr("x1", function(d) { return d.source.x; })
+        .attr("y1", function(d) { return d.source.y; })
+        .attr("x2", function(d) { return d.target.x; })
+        .attr("y2", function(d) { return d.target.y; });
+
+    node.attr("transform", function(d) {
+      return "translate(" + d.x + "," + d.y + ")";
+    });
+  });
+});
 
 </script>
